@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/billziss-gh/cgofuse/fuse"
 	bf "github.com/aloknerurkar/bee-fs/pkg/file"
 	"github.com/aloknerurkar/bee-fs/pkg/store"
+	"github.com/billziss-gh/cgofuse/fuse"
 	"github.com/ethersphere/bee/pkg/file"
 	"github.com/ethersphere/bee/pkg/file/loadsave"
 	"github.com/ethersphere/bee/pkg/manifest/mantaray"
@@ -526,6 +526,8 @@ func (b *BeeFs) Setchgtime(path string, tmsp fuse.Timespec) (errc int) {
 type WalkFunc func(path string, nd FsNode) (err error, stop bool)
 
 func (b *BeeFs) Walk(ctx context.Context, walker WalkFunc) error {
+	defer trace(time.Now(), new(int))
+
 	var nodesToWalk nodeQueue
 	nodesToWalk.push(string(os.PathSeparator), b.root)
 	for p, currentPath := nodesToWalk.pop(); p != nil; p, currentPath = nodesToWalk.pop() {
@@ -543,6 +545,8 @@ func (b *BeeFs) Walk(ctx context.Context, walker WalkFunc) error {
 }
 
 func (b *BeeFs) Snapshot() (swarm.Address, error) {
+	defer trace(time.Now(), new(int))
+
 	ctx, _ := context.WithTimeout(context.Background(), time.Minute*15)
 	m := mantaray.New()
 	err := b.Walk(ctx, func(path string, nd FsNode) (error, bool) {
@@ -561,6 +565,7 @@ func (b *BeeFs) Snapshot() (swarm.Address, error) {
 	if err != nil {
 		return swarm.ZeroAddress, err
 	}
+	log.Debugf("snapshot %s", m)
 
 	err = m.Save(context.Background(), b.ls)
 	if err != nil {
@@ -579,14 +584,11 @@ type nodeQueue struct {
 	items []nodeWithPath
 }
 
-func (n nodeQueue) push(path string, v *fsNode) {
-	if n.items == nil {
-		n.items = make([]nodeWithPath, 0)
-	}
+func (n *nodeQueue) push(path string, v *fsNode) {
 	n.items = append(n.items, nodeWithPath{v, path})
 }
 
-func (n nodeQueue) pop() (*fsNode, string) {
+func (n *nodeQueue) pop() (*fsNode, string) {
 	var res nodeWithPath
 	if len(n.items) == 0 {
 		return nil, ""
