@@ -7,6 +7,8 @@ import (
 
 	"github.com/aloknerurkar/bee-fs/pkg/mounter"
 	"github.com/aloknerurkar/bee-fs/pkg/store"
+	"github.com/aloknerurkar/bee-fs/pkg/store/badger"
+	"github.com/aloknerurkar/bee-fs/pkg/store/beestore"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/gorilla/mux"
 )
@@ -29,6 +31,8 @@ func NewRouter(mntr mounter.BeeFsMounter) *mux.Router {
 	r.HandleFunc("/mount", h.removeMount).Methods("DELETE")
 	r.HandleFunc("/mount", h.getMount).Methods("GET")
 	r.HandleFunc("/mounts", h.listMounts).Methods("GET")
+	r.HandleFunc("/snapshot", h.createSnapshot).Methods("POST")
+	r.HandleFunc("/snapshot", h.getSnapshotInfo).Methods("GET")
 
 	return r
 }
@@ -64,7 +68,18 @@ func (h *httpRouter) createMount(w http.ResponseWriter, r *http.Request) {
 		createReq.APIHostPort = defaultHostPort
 	}
 
-	storage := store.NewAPIStore(createReq.APIHost, createReq.APIHostPort, createReq.APIUseSSL)
+	backupStorage := beestore.NewAPIStore(
+		createReq.APIHost,
+		createReq.APIHostPort,
+		createReq.APIUseSSL,
+		createReq.Batch,
+	)
+
+	storage, err := badgerstore.NewBadgerStore(createReq.Path, backupStorage.(store.BackupStore))
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 
 	opts := []mounter.MountOption{mounter.WithStorage(storage)}
 
@@ -122,4 +137,30 @@ func (h *httpRouter) listMounts(w http.ResponseWriter, r *http.Request) {
 	mnts := h.mntr.List()
 
 	jsonhttp.OK(w, mnts)
+}
+
+func (h *httpRouter) createSnapshot(w http.ResponseWriter, r *http.Request) {
+	mntPath := r.URL.Query().Get("path")
+	if mntPath == "" {
+		jsonhttp.BadRequest(w, "mount path not specified")
+		return
+	}
+	ref, err := h.mntr.Snapshot(r.Context(), mntPath)
+	if err != nil {
+		jsonhttp.BadRequest(w, err)
+		return
+	}
+
+	jsonhttp.OK(w, ref)
+}
+
+func (h *httpRouter) getSnapshotInfo(w http.ResponseWriter, r *http.Request) {
+	mntPath := r.URL.Query().Get("path")
+	if mntPath == "" {
+		jsonhttp.BadRequest(w, "mount path not specified")
+		return
+	}
+	infos := h.mntr.SnapshotInfo(r.Context(), mntPath)
+
+	jsonhttp.OK(w, infos)
 }

@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	xsync "golang.org/x/sync/errgroup"
+	"golang.org/x/sync/errgroup"
 	"sync"
 	"time"
 
-	"github.com/billziss-gh/cgofuse/fuse"
 	"github.com/aloknerurkar/bee-fs/pkg/fuse"
 	"github.com/aloknerurkar/bee-fs/pkg/store"
+	"github.com/billziss-gh/cgofuse/fuse"
 	"github.com/ethersphere/bee/pkg/swarm"
 	logger "github.com/ipfs/go-log/v2"
 	"github.com/robfig/cron/v3"
@@ -25,12 +25,15 @@ type BeeFsMounter interface {
 	Get(string) (MountInfo, error)
 	List() []MountInfo
 	Snapshot(context.Context, string) (swarm.Address, error)
+	SnapshotInfo(context.Context, string) []SnapshotInfo
 }
 
 type SnapshotInfo struct {
 	Name      string
 	Timestamp time.Time
 	Reference swarm.Address
+	Tag       string
+	Stats     store.BackupStat
 }
 
 type MountInfo struct {
@@ -72,7 +75,9 @@ func WithEncryption() MountOption {
 func WithStorage(st store.PutGetter) MountOption {
 	return mountOptionFunc(func(m *mount) {
 		m.beeStore = st
-		m.info.BeeHostAddr = st.Info()
+		if info, ok := st.(store.StoreInfo); ok {
+			m.info.BeeHostAddr = info.Info()
+		}
 	})
 }
 
@@ -92,7 +97,7 @@ type mount struct {
 	host      *fuse.FileSystemHost
 	info      MountInfo
 	beeStore  store.PutGetter
-	mntWorker xsync.Group
+	mntWorker errgroup.Group
 	snapLock  sync.Mutex
 }
 
@@ -128,14 +133,24 @@ func (m *mount) snapshot() error {
 	}
 
 	if len(m.info.Snapshots) > 0 && m.info.Snapshots[len(m.info.Snapshots)-1].Reference.Equal(ref) {
-		return errors.New("no diff")
+		return ErrNoDiff
 	}
 
-	m.info.Snapshots = append(m.info.Snapshots, SnapshotInfo{
+	snap := SnapshotInfo{
 		Reference: ref,
 		Timestamp: time.Now(),
-		Name:      fmt.Sprintf("snap_%d", len(m.info.Snapshots)),
-	})
+		Name:      fmt.Sprintf("snap_%d", time.Now().Unix()),
+	}
+
+	if bkpr, ok := m.beeStore.(store.Backuper); ok {
+		stat, err := bkpr.Backup(context.Background(), ref)
+		if err != nil {
+			return fmt.Errorf("failed to backup, reason: %w", err)
+		}
+		snap.Tag = stat
+	}
+
+	m.info.Snapshots = append(m.info.Snapshots, snap)
 
 	if len(m.info.Snapshots) > m.info.KeepCount {
 		m.info.Snapshots = m.info.Snapshots[1:]
@@ -162,16 +177,15 @@ func (b *beeFsMounter) Mount(
 	for _, opt := range opts {
 		opt.apply(mnt)
 	}
+	if mnt.beeStore == nil {
+		return info, errors.New("storage not configured")
+	}
 	if mnt.info.SnapshotSpec != "" {
 		schedule, err := cron.ParseStandard(mnt.info.SnapshotSpec)
 		if err != nil {
 			return info, err
 		}
 		mnt.info.ID = b.snapScheduler.Schedule(schedule, mnt)
-	}
-	if mnt.beeStore == nil {
-		mnt.beeStore = store.NewAPIStore("localhost", 1633, false)
-		mnt.info.BeeHostAddr = "localhost:1633"
 	}
 	mnt.fsImpl, err = fs.New(mnt.beeStore)
 	if err != nil {
@@ -265,4 +279,19 @@ func (b *beeFsMounter) Snapshot(ctx context.Context, mntDir string) (swarm.Addre
 		return mnt.info.Snapshots[len(mnt.info.Snapshots)-1].Reference, nil
 	}
 	return swarm.ZeroAddress, errors.New(mnt.info.LastStatus)
+}
+
+func (b *beeFsMounter) SnapshotInfo(ctx context.Context, mntDir string) (snapInfos []SnapshotInfo) {
+	val, ok := b.mnts.Load(mntDir)
+	if !ok {
+		return
+	}
+	mnt := val.(*mount)
+	snapInfos = mnt.info.Snapshots
+	if backupSt, ok := mnt.beeStore.(store.Backuper); ok {
+		for i, v := range snapInfos {
+			snapInfos[i].Stats = backupSt.Status(ctx, v.Tag)
+		}
+	}
+	return snapInfos
 }

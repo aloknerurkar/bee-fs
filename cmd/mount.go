@@ -7,20 +7,23 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"text/tabwriter"
 	"time"
 
-	"github.com/briandowns/spinner"
 	"github.com/aloknerurkar/bee-fs/pkg/api"
 	"github.com/aloknerurkar/bee-fs/pkg/mounter"
+	"github.com/briandowns/spinner"
+	"github.com/cheynewallace/tabby"
 	"github.com/spf13/cobra"
 )
 
-var mountCmd = &cobra.Command{
-	Use:   "mount",
-	Short: "Mount bee-fs endpoint",
-}
+func initMountCommands(root *cobra.Command) {
+	mountCmd := &cobra.Command{
+		Use:   "mount",
+		Short: "Mount bee-fs endpoint",
+	}
 
-func initMountCommands() *cobra.Command {
 	mountOpts := api.CreateMountRequest{}
 
 	mountCreateCmd := &cobra.Command{
@@ -61,7 +64,9 @@ func initMountCommands() *cobra.Command {
 					return fmt.Errorf("failed sending mount request err: %w", err)
 				}
 
-				req, err := http.NewRequestWithContext(cmd.Context(), "POST", "", bytes.NewBuffer(reqBytes))
+				url := strings.Join([]string{apiHost, "mount"}, "/")
+
+				req, err := http.NewRequestWithContext(cmd.Context(), "POST", url, bytes.NewBuffer(reqBytes))
 				if err != nil {
 					return fmt.Errorf("failed creating HTTP request err: %w", err)
 				}
@@ -113,7 +118,9 @@ func initMountCommands() *cobra.Command {
 			s.Start()
 
 			err := func() error {
-				req, err := http.NewRequestWithContext(cmd.Context(), "DELETE", "", nil)
+				url := strings.Join([]string{apiHost, "mount"}, "/")
+
+				req, err := http.NewRequestWithContext(cmd.Context(), "DELETE", url, nil)
 				if err != nil {
 					return fmt.Errorf("failed creating HTTP request err: %w", err)
 				}
@@ -147,6 +154,8 @@ func initMountCommands() *cobra.Command {
 		},
 	}
 
+	var snapDetails bool
+
 	mountShowCmd := &cobra.Command{
 		Use:   "get",
 		Short: "Show mounted bee-fs endpoint",
@@ -160,7 +169,9 @@ func initMountCommands() *cobra.Command {
 			info := mounter.MountInfo{}
 
 			err := func() error {
-				req, err := http.NewRequestWithContext(cmd.Context(), "GET", "", nil)
+				url := strings.Join([]string{apiHost, "mount"}, "/")
+
+				req, err := http.NewRequestWithContext(cmd.Context(), "GET", url, nil)
 				if err != nil {
 					return fmt.Errorf("failed creating HTTP request err: %w", err)
 				}
@@ -192,9 +203,18 @@ func initMountCommands() *cobra.Command {
 				return err
 			}
 
+			showMountInfo(cmd, info)
+
+			if snapDetails {
+				cmd.Println("\n\n")
+				showSnapshotInfo(cmd, info.Snapshots...)
+			}
+
 			return nil
 		},
 	}
+
+	mountShowCmd.Flags().BoolVar(&snapDetails, "snapshots", false, "show snapshot info")
 
 	mountListCmd := &cobra.Command{
 		Use:   "list",
@@ -208,7 +228,9 @@ func initMountCommands() *cobra.Command {
 			infos := []mounter.MountInfo{}
 
 			err := func() error {
-				req, err := http.NewRequestWithContext(cmd.Context(), "GET", "", nil)
+				url := strings.Join([]string{apiHost, "mounts"}, "/")
+
+				req, err := http.NewRequestWithContext(cmd.Context(), "GET", url, nil)
 				if err != nil {
 					return fmt.Errorf("failed creating HTTP request err: %w", err)
 				}
@@ -236,6 +258,8 @@ func initMountCommands() *cobra.Command {
 				return err
 			}
 
+			showMountInfo(cmd, infos...)
+
 			return nil
 		},
 	}
@@ -245,5 +269,14 @@ func initMountCommands() *cobra.Command {
 	mountCmd.AddCommand(mountShowCmd)
 	mountCmd.AddCommand(mountListCmd)
 
-	return mountCmd
+	root.AddCommand(mountCmd)
+}
+
+func showMountInfo(cmd *cobra.Command, mnts ...mounter.MountInfo) {
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	t := tabby.NewCustom(w)
+	t.AddHeader("PATH", "ACTIVE", "SNAPSHOT POLICY", "KEEP COUNT", "ENCRYPTION", "NO OF SNAPSHOTS", "PREVIOUS RUN", "STATUS", "NEXT RUN")
+	for _, m := range mnts {
+		t.AddLine(m.Path, m.Active, m.SnapshotSpec, m.KeepCount, m.Encryption, len(m.Snapshots), m.LastRun, m.LastStatus, m.NextRun)
+	}
 }
