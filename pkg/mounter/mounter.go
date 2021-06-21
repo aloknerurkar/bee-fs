@@ -250,10 +250,17 @@ func (b *beeFsMounter) Get(path string) (retMnt MountInfo, err error) {
 	if !ok {
 		return retMnt, errors.New("not found")
 	}
-	sentry := b.snapScheduler.Entry(val.(*mount).info.ID)
-	val.(*mount).info.LastRun = sentry.Prev
-	val.(*mount).info.NextRun = sentry.Next
-	return val.(*mount).info, nil
+	mnt := val.(*mount)
+	ctx := context.Background()
+	if backupSt, ok := mnt.beeStore.(store.Backuper); ok {
+		for i, v := range mnt.info.Snapshots {
+			mnt.info.Snapshots[i].Stats = backupSt.Status(ctx, v.Tag)
+		}
+	}
+	sentry := b.snapScheduler.Entry(mnt.info.ID)
+	mnt.info.LastRun = sentry.Prev
+	mnt.info.NextRun = sentry.Next
+	return mnt.info, nil
 }
 
 func (b *beeFsMounter) List() (retMnts []MountInfo) {
