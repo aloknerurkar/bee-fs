@@ -41,6 +41,8 @@ func initDaemon(cmd *cobra.Command) {
 				return fmt.Errorf("failed creating api file err: %w", err)
 			}
 
+			defer os.Remove(apiFilePath)
+
 			mntr := mounter.New()
 			router := api.NewRouter(mntr)
 
