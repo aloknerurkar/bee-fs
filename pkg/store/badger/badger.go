@@ -190,3 +190,7 @@ func (b *badgerStore) Status(ctx context.Context, tag string) (res store.BackupS
 	}
 	return store.BackupStat(*tags)
 }
+
+func (b *badgerStore) Close() error {
+	return b.db.Close()
+}

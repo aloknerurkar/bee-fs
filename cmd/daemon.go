@@ -44,6 +44,8 @@ func initDaemon(cmd *cobra.Command) {
 			mntr := mounter.New()
 			router := api.NewRouter(mntr)
 
+			defer mntr.Close()
+
 			srv := &http.Server{
 				Addr: fmt.Sprintf("0.0.0.0:%d", port),
 				// Good practice to set timeouts to avoid Slowloris attacks.

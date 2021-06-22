@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/sync/errgroup"
+	"io"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type BeeFsMounter interface {
 	List() []MountInfo
 	Snapshot(context.Context, string) (swarm.Address, error)
 	SnapshotInfo(context.Context, string) []SnapshotInfo
+	io.Closer
 }
 
 type SnapshotInfo struct {
@@ -87,8 +89,10 @@ type beeFsMounter struct {
 }
 
 func New() BeeFsMounter {
+	c := cron.New()
+	c.Start()
 	return &beeFsMounter{
-		snapScheduler: cron.New(),
+		snapScheduler: c,
 	}
 }
 
@@ -301,4 +305,17 @@ func (b *beeFsMounter) SnapshotInfo(ctx context.Context, mntDir string) (snapInf
 		}
 	}
 	return snapInfos
+}
+
+func (b *beeFsMounter) Close() error {
+	b.snapScheduler.Stop()
+	ctx, _ := context.WithTimeout(context.Background(), time.Minute*5)
+	b.mnts.Range(func(k, v interface{}) bool {
+		v.(*mount).snapLock.Lock()
+		b.Unmount(ctx, k.(string))
+		v.(*mount).beeStore.(io.Closer).Close()
+		v.(*mount).snapLock.Unlock()
+		return true
+	})
+	return nil
 }
