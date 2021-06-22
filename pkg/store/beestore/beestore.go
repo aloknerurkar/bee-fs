@@ -110,8 +110,8 @@ func (a *APIStore) PutWithTag(ctx context.Context, mode storage.ModePut, tag str
 			return err
 		}
 		req.Header.Set("Content-Type", "application/octet-stream")
-		req.Header.Set("swarm-postage-batch-id", a.batch)
-		req.Header.Set("swarm-tag", tag)
+		req.Header.Set("Swarm-Postage-Batch-Id", a.batch)
+		req.Header.Set("Swarm-Tag", tag)
 		res, err := a.Client.Do(req)
 		if err != nil {
 			return err
