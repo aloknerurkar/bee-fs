@@ -9,29 +9,39 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 )
 
 var apiHost string
+
+func getApiFilepath() string {
+	hostPath := os.Getenv("API")
+	if hostPath == "" {
+		hPath, err := homedir.Dir()
+		if err != nil {
+			return ""
+		}
+		hostPath = hPath + string(os.PathSeparator) + ".bee-fs" + string(os.PathSeparator) + "api"
+	}
+	return hostPath
+}
 
 func main() {
 	c := &cobra.Command{
 		Short:        "Used for FileSystem interface with swarm network",
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			hostPath := os.Getenv("API")
-			if hostPath == "" {
-				hostPath = ""
-			}
+			hostPath := getApiFilepath()
 			hostAddr, err := ioutil.ReadFile(hostPath)
-			if err != nil {
-				return err
+			if err == nil {
+				apiHost = string(hostAddr)
 			}
-			apiHost = string(hostAddr)
 			return nil
 		},
 	}
 
+	initDaemon(c)
 	initMountCommands(c)
 	initSnapshotCommands(c)
 

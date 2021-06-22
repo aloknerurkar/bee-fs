@@ -9,10 +9,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/aloknerurkar/bee-fs/pkg/api"
 	"github.com/aloknerurkar/bee-fs/pkg/mounter"
 	"github.com/briandowns/spinner"
 	"github.com/cheynewallace/tabby"
-	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/spf13/cobra"
 )
 
@@ -32,7 +32,7 @@ func initSnapshotCommands(root *cobra.Command) {
 			s.Color("green")
 			s.Start()
 
-			var snap swarm.Address
+			var snap api.SnapshotResponse
 
 			err := func() error {
 				url := strings.Join([]string{apiHost, "snapshot"}, "/")
@@ -68,7 +68,7 @@ func initSnapshotCommands(root *cobra.Command) {
 				return err
 			}
 
-			cmd.Println("Successfully created snapshot with reference", snap.String())
+			cmd.Println("Successfully created snapshot with reference", snap.Reference.String())
 
 			return nil
 		},
@@ -140,4 +140,5 @@ func showSnapshotInfo(cmd *cobra.Command, snaps ...mounter.SnapshotInfo) {
 		syncedPercent := fmt.Sprintf("%d%%", (s.Stats.Synced * 100 / s.Stats.Processed))
 		t.AddLine(s.Name, s.Timestamp, s.Reference, syncedPercent)
 	}
+	t.Print()
 }

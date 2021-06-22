@@ -10,6 +10,7 @@ import (
 	"github.com/aloknerurkar/bee-fs/pkg/store/badger"
 	"github.com/aloknerurkar/bee-fs/pkg/store/beestore"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
+	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/gorilla/mux"
 )
 
@@ -139,6 +140,10 @@ func (h *httpRouter) listMounts(w http.ResponseWriter, r *http.Request) {
 	jsonhttp.OK(w, mnts)
 }
 
+type SnapshotResponse struct {
+	Reference swarm.Address
+}
+
 func (h *httpRouter) createSnapshot(w http.ResponseWriter, r *http.Request) {
 	mntPath := r.URL.Query().Get("path")
 	if mntPath == "" {
@@ -151,7 +156,9 @@ func (h *httpRouter) createSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonhttp.OK(w, ref)
+	jsonhttp.OK(w, &SnapshotResponse{
+		Reference: ref,
+	})
 }
 
 func (h *httpRouter) getSnapshotInfo(w http.ResponseWriter, r *http.Request) {

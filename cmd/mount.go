@@ -227,6 +227,7 @@ func initMountCommands(root *cobra.Command) {
 
 			infos := []mounter.MountInfo{}
 
+			fmt.Println("making request")
 			err := func() error {
 				url := strings.Join([]string{apiHost, "mounts"}, "/")
 
@@ -279,4 +280,5 @@ func showMountInfo(cmd *cobra.Command, mnts ...mounter.MountInfo) {
 	for _, m := range mnts {
 		t.AddLine(m.Path, m.Active, m.SnapshotSpec, m.KeepCount, m.Encryption, len(m.Snapshots), m.LastRun, m.LastStatus, m.NextRun)
 	}
+	t.Print()
 }
