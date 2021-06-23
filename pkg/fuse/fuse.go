@@ -1,7 +1,10 @@
 package fs
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/gob"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -90,8 +93,22 @@ func (f *fsNode) IsDir() bool {
 	return false
 }
 
+type FsMetadata struct {
+	Stat fuse.Stat_t
+	Xatr map[string][]byte
+}
+
 func (f *fsNode) Metadata() string {
-	return ""
+	md := FsMetadata{
+		Stat: f.stat,
+		Xatr: f.xatr,
+	}
+	var buf bytes.Buffer
+	err := gob.NewEncoder(&buf).Encode(md)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
 type BeeFs struct {
