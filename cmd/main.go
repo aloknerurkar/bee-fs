@@ -44,6 +44,7 @@ func main() {
 	initDaemon(c)
 	initMountCommands(c)
 	initSnapshotCommands(c)
+	initRestoreCommands(c)
 
 	c.SetOutput(c.OutOrStdout())
 	err := c.Execute()

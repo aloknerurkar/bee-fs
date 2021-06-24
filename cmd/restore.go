@@ -35,8 +35,8 @@ func initRestoreCommands(root *cobra.Command) {
 			s.Color("green")
 			s.Start()
 
+			dstFile := args[0] + ".tar.gz"
 			err := func() error {
-				dstFile := args[0] + ".tar.gz"
 				if len(args) == 2 {
 					dstFile = filepath.Join(args[1], dstFile)
 				}
@@ -59,7 +59,7 @@ func initRestoreCommands(root *cobra.Command) {
 				return err
 			}
 
-			cmd.Println("Successfully restored snapshot", args[0], "at", args[1])
+			cmd.Println("Successfully restored snapshot", args[0], "at", dstFile)
 
 			return nil
 		},

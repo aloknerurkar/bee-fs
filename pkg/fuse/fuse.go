@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/gob"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -26,6 +27,10 @@ import (
 	"github.com/ethersphere/bee/pkg/swarm"
 	logger "github.com/ipfs/go-log/v2"
 )
+
+func init() {
+	gob.Register(FsMetadata{})
+}
 
 const (
 	MetadataKey = "metadata"
@@ -118,11 +123,13 @@ func fromManifest(m *mantaray.Node, isDir bool, st store.PutGetter, encrypt bool
 	md := FsMetadata{}
 	mdBuf, err := base64.StdEncoding.DecodeString(m.Metadata()[MetadataKey])
 	if err != nil {
+		log.Error("failed decoding metadata string", err)
 		return nil, err
 	}
 	buf := bytes.NewBuffer(mdBuf)
 	err = gob.NewDecoder(buf).Decode(&md)
 	if err != nil {
+		log.Error("failed decoding gob", err)
 		return nil, err
 	}
 	var f *bf.BeeFile
@@ -156,7 +163,7 @@ func Restore(ctx context.Context, ref swarm.Address, dst string, st store.PutGet
 			return err
 		}
 		if string(path) == "" {
-			path = []byte(string(os.PathSeparator))
+			return nil
 		}
 		nd, err := m.LookupNode(context.Background(), path, ls)
 		if err != nil {
@@ -164,6 +171,7 @@ func Restore(ctx context.Context, ref swarm.Address, dst string, st store.PutGet
 		}
 		fsNd, err := fromManifest(nd, isDir, st, encrypted)
 		if err != nil {
+			log.Errorf("failed reading from manifest", err)
 			return err
 		}
 		if !isDir {
@@ -176,12 +184,14 @@ func Restore(ctx context.Context, ref swarm.Address, dst string, st store.PutGet
 				Mode:       int64(fsNd.stat.Mode),
 				Uid:        int(fsNd.stat.Uid),
 				Gid:        int(fsNd.stat.Gid),
+				Size:       fsNd.stat.Size,
 			})
 			if err != nil {
+				log.Error("failed writing header", err)
 				return err
 			}
 			_, err = io.Copy(tw, fsNd.data)
-			if err != nil {
+			if err != nil && !errors.Is(err, io.EOF) {
 				return err
 			}
 		}
@@ -191,7 +201,7 @@ func Restore(ctx context.Context, ref swarm.Address, dst string, st store.PutGet
 		log.Error("failed initializing from reference", err)
 		return err
 	}
-	return nil
+	return tw.Flush()
 }
 
 type BeeFs struct {
