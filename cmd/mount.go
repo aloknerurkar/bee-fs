@@ -227,7 +227,6 @@ func initMountCommands(root *cobra.Command) {
 
 			infos := []mounter.MountInfo{}
 
-			fmt.Println("making request")
 			err := func() error {
 				url := strings.Join([]string{apiHost, "mounts"}, "/")
 

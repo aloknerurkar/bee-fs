@@ -1,10 +1,13 @@
 package fs
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/gob"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -111,13 +114,92 @@ func (f *fsNode) Metadata() string {
 	return base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
+func fromManifest(m *mantaray.Node, isDir bool, st store.PutGetter, encrypt bool) (*fsNode, error) {
+	md := FsMetadata{}
+	mdBuf, err := base64.StdEncoding.DecodeString(m.Metadata()[MetadataKey])
+	if err != nil {
+		return nil, err
+	}
+	buf := bytes.NewBuffer(mdBuf)
+	err = gob.NewDecoder(buf).Decode(&md)
+	if err != nil {
+		return nil, err
+	}
+	var f *bf.BeeFile
+	if !isDir {
+		f = bf.New(swarm.NewAddress(m.Entry()), st, encrypt)
+	}
+	return &fsNode{
+		stat: md.Stat,
+		xatr: md.Xatr,
+		chld: make(map[string]*fsNode),
+		data: f,
+	}, nil
+}
+
+func Restore(ctx context.Context, ref swarm.Address, dst string, st store.PutGetter, encrypted bool) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+
+	ls := loadsave.New(st, storage.ModePutUpload, encrypted)
+
+	gw := gzip.NewWriter(out)
+	defer gw.Close()
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	m := mantaray.NewNodeRef(ref.Bytes())
+	err = m.Walk(context.Background(), []byte(""), ls, func(path []byte, isDir bool, err error) error {
+		if err != nil {
+			return err
+		}
+		if string(path) == "" {
+			path = []byte(string(os.PathSeparator))
+		}
+		nd, err := m.LookupNode(context.Background(), path, ls)
+		if err != nil {
+			return err
+		}
+		fsNd, err := fromManifest(nd, isDir, st, encrypted)
+		if err != nil {
+			return err
+		}
+		if !isDir {
+			err = tw.WriteHeader(&tar.Header{
+				Typeflag:   tar.TypeReg,
+				Name:       string(path),
+				ModTime:    fsNd.stat.Mtim.Time(),
+				AccessTime: fsNd.stat.Atim.Time(),
+				ChangeTime: fsNd.stat.Ctim.Time(),
+				Mode:       int64(fsNd.stat.Mode),
+				Uid:        int(fsNd.stat.Uid),
+				Gid:        int(fsNd.stat.Gid),
+			})
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(tw, fsNd.data)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Error("failed initializing from reference", err)
+		return err
+	}
+	return nil
+}
+
 type BeeFs struct {
 	fuse.FileSystemBase
 	lock      sync.Mutex
 	ino       uint64
 	root      *fsNode
 	openmap   map[uint64]*fsNode
-	rm        *mantaray.Node
 	ls        file.LoadSaver
 	store     store.PutGetter
 	reference swarm.Address
@@ -158,17 +240,89 @@ func New(st store.PutGetter, opts ...Option) (*BeeFs, error) {
 		mode = storage.ModePutUploadPin
 	}
 	b.ls = loadsave.New(b.store, mode, b.encrypt)
+	savedSt := &saveState{}
+	if itStore, ok := b.store.(store.ItemStore); ok {
+		err := itStore.GetItem(savedSt)
+		if err == nil {
+			b.reference = savedSt.ref
+		}
+	}
 	if b.reference.Equal(swarm.ZeroAddress) {
-		m := mantaray.New()
-		b.rm = m
 		b.ino++
 		b.root = b.newNode(0, b.ino, fuse.S_IFDIR|00777, 0, 0)
-		b.openmap = map[uint64]*fsNode{}
-	} else {
-		m := mantaray.NewNodeRef(b.reference.Bytes())
-		b.rm = m
 	}
+	b.openmap = map[uint64]*fsNode{}
 	return b, nil
+}
+
+func (b *BeeFs) Init() {
+	defer trace(time.Now(), new(int))
+	if b.reference.Equal(swarm.ZeroAddress) {
+		return
+	}
+	m := mantaray.NewNodeRef(b.reference.Bytes())
+	err := m.Walk(context.Background(), []byte(""), b.ls, func(path []byte, isDir bool, err error) error {
+		if err != nil {
+			return err
+		}
+		if string(path) == "" {
+			path = []byte(string(os.PathSeparator))
+		}
+		nd, err := m.LookupNode(context.Background(), path, b.ls)
+		if err != nil {
+			return err
+		}
+		fsNd, err := fromManifest(nd, isDir, b.store, b.encrypt)
+		if err != nil {
+			return err
+		}
+		if string(path) == string(os.PathSeparator) {
+			b.root = fsNd
+		} else {
+			_, _, prnt := b.lookupNode(filepath.Dir(string(path)), nil)
+			if prnt == nil {
+				return err
+			}
+			prnt.chld[filepath.Base(string(path))] = fsNd
+		}
+		return nil
+	})
+	if err != nil {
+		log.Error("failed initializing from reference", err)
+	}
+}
+
+type saveState struct {
+	ref swarm.Address
+}
+
+func (s *saveState) Key() []byte {
+	return []byte("savedstate")
+}
+
+func (s *saveState) Marshal() ([]byte, error) {
+	return s.ref.Bytes(), nil
+}
+
+func (s *saveState) Unmarshal(buf []byte) error {
+	s.ref = swarm.NewAddress(buf)
+	return nil
+}
+
+func (b *BeeFs) Destroy() {
+	defer trace(time.Now(), new(int))
+
+	if itStore, ok := b.store.(store.ItemStore); ok {
+		ref, err := b.Snapshot()
+		if err != nil {
+			panic(err)
+		}
+
+		err = itStore.StoreItem(&saveState{ref})
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 func (b *BeeFs) Mknod(path string, mode uint32, dev uint64) (errc int) {
@@ -361,8 +515,17 @@ func (b *BeeFs) Read(path string, buff []byte, ofst int64, fh uint64) (n int) {
 		return -fuse.ENOENT
 	}
 	var err error
-	n, err = node.data.ReadAt(buff, ofst)
+	if cap(buff)-len(buff) > 1024 {
+		dBuf := make([]byte, len(buff))
+		n, err = node.data.ReadAt(dBuf, ofst)
+		if err == nil {
+			copy(buff, dBuf)
+		}
+	} else {
+		n, err = node.data.ReadAt(buff, ofst)
+	}
 	if err != nil {
+		log.Error("failed read", err)
 		return -fuse.EIO
 	}
 	node.stat.Atim = fuse.Now()
@@ -553,8 +716,14 @@ func (b *BeeFs) Walk(ctx context.Context, walker WalkFunc) error {
 			return err
 		}
 		if p.IsDir() {
-			for k, v := range p.chld {
-				nodesToWalk.push(filepath.Join(currentPath, k), v)
+			keys := make([]string, len(p.chld))
+			i := 0
+			for k, _ := range p.chld {
+				keys[i] = k
+				i++
+			}
+			for _, k := range keys {
+				nodesToWalk.push(filepath.Join(currentPath, k), p.chld[k])
 			}
 		}
 	}

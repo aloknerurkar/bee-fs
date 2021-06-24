@@ -82,6 +82,9 @@ func (b *badgerStore) Get(ctx context.Context, mode storage.ModeGet, address swa
 
 	item, err := rdr.Get(address.Bytes())
 	if err != nil {
+		if b.backupStore != nil {
+			return b.backupStore.Get(ctx, mode, address)
+		}
 		return nil, err
 	}
 	var valCopy []byte
@@ -146,7 +149,6 @@ func (b *badgerStore) Backup(ctx context.Context, addr swarm.Address) (string, e
 				return cCtx.Err()
 			}
 		}
-		return nil
 	})
 
 	group.Go(func() error {
@@ -166,7 +168,6 @@ func (b *badgerStore) Backup(ctx context.Context, addr swarm.Address) (string, e
 				return cCtx.Err()
 			}
 		}
-		return nil
 	})
 	processAddress := func(ref swarm.Address) error {
 		addrChan <- ref

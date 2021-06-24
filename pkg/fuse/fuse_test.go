@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aloknerurkar/bee-fs/pkg/fuse"
+	"github.com/aloknerurkar/bee-fs/pkg/store"
 	"github.com/billziss-gh/cgofuse/fuse"
 	"github.com/ethersphere/bee/pkg/storage/mock"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -26,13 +27,25 @@ var logs = flag.Bool("logs", false, "Enable logs")
 
 type testStorer struct {
 	*mock.MockStorer
+	mp map[string][]byte
 }
 
 func (t *testStorer) Info() string {
 	return "mockstorer"
 }
 
-func newTestFs() (*fs.BeeFs, string, func(), error) {
+func (t *testStorer) GetItem(i store.Item) error {
+	buf := t.mp[string(i.Key())]
+	return i.Unmarshal(buf)
+}
+
+func (t *testStorer) StoreItem(i store.Item) error {
+	buf, _ := i.Marshal()
+	t.mp[string(i.Key())] = buf
+	return nil
+}
+
+func newTestFs(st *testStorer) (*fs.BeeFs, string, func(), error) {
 	if *logs {
 		logger.SetLogLevel("*", "Debug")
 	}
@@ -40,7 +53,7 @@ func newTestFs() (*fs.BeeFs, string, func(), error) {
 	if err != nil {
 		return nil, "", func() {}, err
 	}
-	fsImpl, err := fs.New(&testStorer{mock.NewStorer()})
+	fsImpl, err := fs.New(st)
 	if err != nil {
 		return nil, "", func() {}, err
 	}
@@ -69,7 +82,8 @@ func newTestFs() (*fs.BeeFs, string, func(), error) {
 }
 
 func TestFileBasic(t *testing.T) {
-	_, mntDir, closer, err := newTestFs()
+	st := &testStorer{MockStorer: mock.NewStorer(), mp: make(map[string][]byte)}
+	_, mntDir, closer, err := newTestFs(st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +184,8 @@ func TestMultiDirWithFiles(t *testing.T) {
 		},
 	}
 
-	fsImpl, mntDir, closer, err := newTestFs()
+	st := &testStorer{MockStorer: mock.NewStorer(), mp: make(map[string][]byte)}
+	fsImpl, mntDir, closer, err := newTestFs(st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,9 +225,10 @@ func TestMultiDirWithFiles(t *testing.T) {
 		}
 	})
 
-	t.Run("verify structure", func(t *testing.T) {
+	verify := func(t *testing.T, mnt string) {
+		t.Helper()
 		for _, v := range entries {
-			st, err := os.Stat(filepath.Join(mntDir, v.path))
+			st, err := os.Stat(filepath.Join(mnt, v.path))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,13 +239,17 @@ func TestMultiDirWithFiles(t *testing.T) {
 				if st.Size() != v.size {
 					t.Fatalf("expected size %d found %d", v.size, st.Size())
 				}
-				if got, err := ioutil.ReadFile(filepath.Join(mntDir, v.path)); err != nil {
+				if got, err := ioutil.ReadFile(filepath.Join(mnt, v.path)); err != nil {
 					t.Fatalf("ReadFile: %v", err)
 				} else if bytes.Compare(got, v.content) != 0 {
-					t.Fatalf("ReadFile: got %q, want %q", got, v.content[:30])
+					t.Fatalf("ReadFile: got %q, want %q", got[:30], v.content[:30])
 				}
 			}
 		}
+	}
+
+	t.Run("verify structure", func(t *testing.T) {
+		verify(t, mntDir)
 	})
 
 	t.Run("fstest", func(t *testing.T) {
@@ -304,4 +324,15 @@ func TestMultiDirWithFiles(t *testing.T) {
 		// 	t.Fatalf("snapshot without changes unequal exp: %s found: %s", ref, ref2)
 		// }
 	})
+
+	// t.Run("unmount and mount and verify", func(t *testing.T) {
+	// 	closer()
+	// 	time.Sleep(time.Second)
+	// 	fsImpl, mntDir, closer, err = newTestFs(st)
+	// 	if err != nil {
+	// 		t.Fatal(err)
+	// 	}
+	// 	time.Sleep(time.Second)
+	// 	verify(t, mntDir)
+	// })
 }

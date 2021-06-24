@@ -83,6 +83,10 @@ func WithStorage(st store.PutGetter) MountOption {
 	})
 }
 
+func WithReference(ref swarm.Address) MountOption {
+	return mountOptionFunc(func(m *mount) { m.reference = ref })
+}
+
 type beeFsMounter struct {
 	mnts          sync.Map
 	snapScheduler *cron.Cron
@@ -103,6 +107,7 @@ type mount struct {
 	beeStore  store.PutGetter
 	mntWorker errgroup.Group
 	snapLock  sync.Mutex
+	reference swarm.Address
 }
 
 func (m *mount) Run() {
@@ -191,7 +196,11 @@ func (b *beeFsMounter) Mount(
 		}
 		mnt.info.ID = b.snapScheduler.Schedule(schedule, mnt)
 	}
-	mnt.fsImpl, err = fs.New(mnt.beeStore)
+	fuseOpts := []fs.Option{fs.WithEncryption(mnt.info.Encryption)}
+	if !mnt.reference.Equal(swarm.ZeroAddress) {
+		fuseOpts = append(fuseOpts, fs.WithReference(mnt.reference))
+	}
+	mnt.fsImpl, err = fs.New(mnt.beeStore, fuseOpts...)
 	if err != nil {
 		return info, err
 	}
@@ -226,6 +235,10 @@ func (b *beeFsMounter) Unmount(ctx context.Context, mntDir string) (err error) {
 	if !mnt.info.Active {
 		return errors.New("mount not active")
 	}
+
+	mnt.snapLock.Lock()
+	defer mnt.snapLock.Unlock()
+
 	mnt.host.Unmount()
 	stopped := make(chan struct{})
 	go func() {
@@ -236,6 +249,10 @@ func (b *beeFsMounter) Unmount(ctx context.Context, mntDir string) (err error) {
 	case <-stopped:
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+
+	if closer, ok := mnt.beeStore.(io.Closer); ok {
+		return closer.Close()
 	}
 
 	return nil
@@ -311,10 +328,7 @@ func (b *beeFsMounter) Close() error {
 	b.snapScheduler.Stop()
 	ctx, _ := context.WithTimeout(context.Background(), time.Minute*5)
 	b.mnts.Range(func(k, v interface{}) bool {
-		v.(*mount).snapLock.Lock()
 		b.Unmount(ctx, k.(string))
-		v.(*mount).beeStore.(io.Closer).Close()
-		v.(*mount).snapLock.Unlock()
 		return true
 	})
 	return nil
