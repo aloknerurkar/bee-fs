@@ -8,6 +8,7 @@ import (
 	"github.com/aloknerurkar/bee-fs/pkg/mounter"
 	"github.com/aloknerurkar/bee-fs/pkg/store"
 	"github.com/aloknerurkar/bee-fs/pkg/store/badger"
+	"github.com/aloknerurkar/bee-fs/pkg/store/bbolt"
 	"github.com/aloknerurkar/bee-fs/pkg/store/beestore"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -49,6 +50,7 @@ type CreateMountRequest struct {
 	Batch          string
 	Reference      string
 	ReadOnly       bool
+	UseBadger      bool
 }
 
 func (h *httpRouter) createMount(w http.ResponseWriter, r *http.Request) {
@@ -76,10 +78,19 @@ func (h *httpRouter) createMount(w http.ResponseWriter, r *http.Request) {
 		createReq.Batch,
 	)
 
-	storage, err := badgerstore.NewBadgerStore(createReq.Path, backupStorage.(store.BackupStore))
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
+	var storage store.PutGetter
+	if createReq.UseBadger {
+		storage, err = badgerstore.NewBadgerStore(createReq.Path, backupStorage.(store.BackupStore))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		storage, err = boltstore.NewBoltStore(createReq.Path, backupStorage.(store.BackupStore))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	opts := []mounter.MountOption{mounter.WithStorage(storage)}

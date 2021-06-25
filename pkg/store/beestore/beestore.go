@@ -112,6 +112,7 @@ func (a *APIStore) PutWithTag(ctx context.Context, mode storage.ModePut, tag str
 		req.Header.Set("Content-Type", "application/octet-stream")
 		req.Header.Set("Swarm-Postage-Batch-Id", a.batch)
 		req.Header.Set("Swarm-Tag", tag)
+		req.Close = true
 		res, err := a.Client.Do(req)
 		if err != nil {
 			return err

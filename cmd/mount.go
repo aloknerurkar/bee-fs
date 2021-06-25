@@ -78,7 +78,7 @@ func initMountCommands(root *cobra.Command) {
 				defer resp.Body.Close()
 
 				if resp.StatusCode != http.StatusCreated {
-					return errors.New("invalid status on mount create")
+					return errors.New("invalid status on mount create: " + resp.Status)
 				}
 
 				if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
@@ -106,6 +106,7 @@ func initMountCommands(root *cobra.Command) {
 	mountCreateCmd.Flags().StringVar(&mountOpts.Reference, "reference", "", "Use existing reference")
 	mountCreateCmd.Flags().StringVar(&mountOpts.SnapshotPolicy, "snapshot-policy", "@daily", "snapshot policy")
 	mountCreateCmd.Flags().IntVar(&mountOpts.KeepCount, "keep-count", 5, "no. of snapshots to retain")
+	mountCreateCmd.Flags().BoolVar(&mountOpts.UseBadger, "use-badger", false, "use badger backend")
 
 	mountRemoveCmd := &cobra.Command{
 		Use:   "remove",

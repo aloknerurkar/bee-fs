@@ -16,6 +16,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.0 // indirect
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/cobra v1.0.0
+	go.etcd.io/bbolt v1.3.6 // indirect
 	go.uber.org/atomic v1.7.0
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	resenje.org/singleflight v0.2.0 // indirect

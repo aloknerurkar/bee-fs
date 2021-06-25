@@ -83,7 +83,7 @@ func initDaemon(cmd *cobra.Command) {
 		},
 	}
 
-	daemonCmd.Flags().IntVar(&port, "port", 8080, "Bee-fs API port")
+	daemonCmd.Flags().IntVar(&port, "port", 8081, "Bee-fs API port")
 	daemonCmd.Flags().StringVar(&apiFilePath, "api-file-path", "", "Bee API file")
 
 	cmd.AddCommand(daemonCmd)
