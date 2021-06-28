@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -11,18 +12,21 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aloknerurkar/bee-fs/pkg/store"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/gorilla/websocket"
 )
 
 // APIStore provies a storage.Putter that adds chunks to swarm through the HTTP chunk API.
 type APIStore struct {
-	Client  *http.Client
-	baseUrl string
-	tagUrl  string
-	batch   string
+	Client    *http.Client
+	baseUrl   string
+	tagUrl    string
+	streamUrl string
+	batch     string
 }
 
 // NewAPIStore creates a new APIStore.
@@ -41,11 +45,17 @@ func NewAPIStore(host string, port int, tls bool, batch string) store.PutGetter 
 		Scheme: scheme,
 		Path:   "tags",
 	}
+	st := &url.URL{
+		Host:   fmt.Sprintf("%s:%d", host, port),
+		Scheme: "ws",
+		Path:   "stream/chunks",
+	}
 	return &APIStore{
-		Client:  http.DefaultClient,
-		baseUrl: u.String(),
-		tagUrl:  t.String(),
-		batch:   batch,
+		Client:    http.DefaultClient,
+		baseUrl:   u.String(),
+		tagUrl:    t.String(),
+		streamUrl: st.String(),
+		batch:     batch,
 	}
 }
 
@@ -101,27 +111,68 @@ func (a *APIStore) Info() string {
 	return a.baseUrl
 }
 
-func (a *APIStore) PutWithTag(ctx context.Context, mode storage.ModePut, tag string, chs ...swarm.Chunk) (err error) {
-	for _, ch := range chs {
-		buf := bytes.NewReader(ch.Data())
-		url := strings.Join([]string{a.baseUrl}, "/")
-		req, err := http.NewRequestWithContext(ctx, "POST", url, buf)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/octet-stream")
-		req.Header.Set("Swarm-Postage-Batch-Id", a.batch)
-		req.Header.Set("Swarm-Tag", tag)
-		req.Close = true
-		res, err := a.Client.Do(req)
-		if err != nil {
-			return err
-		}
-		if res.StatusCode != http.StatusCreated {
-			return fmt.Errorf("upload failed: %v", res.Status)
-		}
-		res.Body.Close()
+func (a *APIStore) PutWithTag(ctx context.Context, tag string, chs <-chan swarm.Chunk) (err error) {
+	reqHeader := http.Header{}
+	reqHeader.Set("Content-Type", "application/octet-stream")
+	reqHeader.Set("Swarm-Postage-Batch-Id", a.batch)
+	reqHeader.Set("Swarm-Tag", tag)
+
+	dialer := websocket.Dialer{
+		ReadBufferSize:  swarm.ChunkSize,
+		WriteBufferSize: swarm.ChunkSize,
 	}
+
+	conn, _, err := dialer.DialContext(ctx, a.streamUrl, reqHeader)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	var wsErr string
+	serverClosed := make(chan struct{})
+	conn.SetCloseHandler(func(code int, text string) error {
+		wsErr = fmt.Sprintf("websocket connection closed code:%s msg:%s", code, text)
+		close(serverClosed)
+		return nil
+	})
+
+	conn.SetPingHandler(nil)
+	conn.SetPongHandler(nil)
+
+	for ch := range chs {
+		select {
+		case <-serverClosed:
+			return errors.New("server closed unexpectedly")
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		err := conn.SetWriteDeadline(time.Now().Add(time.Second * 4))
+		if err != nil {
+			return err
+		}
+		err = conn.WriteMessage(websocket.BinaryMessage, ch.Data())
+		if err != nil {
+			return err
+		}
+		err = conn.SetReadDeadline(time.Now().Add(time.Second * 4))
+		if err != nil {
+			// server sent close message with error
+			if wsErr != "" {
+				err = errors.New(wsErr)
+				return err
+			}
+			return err
+		}
+		mt, msg, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		if mt != websocket.TextMessage || string(msg) != "success" {
+			return errors.New("invalid msg returned on success")
+		}
+	}
+
 	return nil
 }
 

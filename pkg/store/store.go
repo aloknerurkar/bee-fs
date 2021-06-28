@@ -56,7 +56,7 @@ type TagInfo struct {
 type BackupStore interface {
 	storage.Getter
 
-	PutWithTag(context.Context, storage.ModePut, string, ...swarm.Chunk) error
+	PutWithTag(context.Context, string, <-chan swarm.Chunk) error
 	CreateTag(context.Context) (string, error)
 	GetTag(context.Context, string) (*TagInfo, error)
 }

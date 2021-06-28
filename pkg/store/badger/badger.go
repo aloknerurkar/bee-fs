@@ -135,20 +135,13 @@ func (b *badgerStore) Backup(ctx context.Context, addr swarm.Address) (string, e
 	}
 
 	group.Go(func() error {
-		for {
-			select {
-			case ch, ok := <-chChan:
-				if !ok {
-					return nil
-				}
-				err := b.backupStore.PutWithTag(ctx, storage.ModePutUpload, tag, ch)
-				if err != nil {
-					return err
-				}
-			case <-cCtx.Done():
-				return cCtx.Err()
-			}
+		// this call takes in a chan but is a blocking call, so we could manage the
+		// routine here
+		err := b.backupStore.PutWithTag(ctx, tag, chChan)
+		if err != nil {
+			return err
 		}
+		return nil
 	})
 
 	group.Go(func() error {
