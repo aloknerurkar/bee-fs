@@ -20,6 +20,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var successWsMsg = []byte{}
+
 // APIStore provies a storage.Putter that adds chunks to swarm through the HTTP chunk API.
 type APIStore struct {
 	Client    *http.Client
@@ -48,7 +50,7 @@ func NewAPIStore(host string, port int, tls bool, batch string) store.PutGetter 
 	st := &url.URL{
 		Host:   fmt.Sprintf("%s:%d", host, port),
 		Scheme: "ws",
-		Path:   "stream/chunks",
+		Path:   "chunks/stream",
 	}
 	return &APIStore{
 		Client:    http.DefaultClient,
@@ -136,9 +138,6 @@ func (a *APIStore) PutWithTag(ctx context.Context, tag string, chs <-chan swarm.
 		return nil
 	})
 
-	conn.SetPingHandler(nil)
-	conn.SetPongHandler(nil)
-
 	for ch := range chs {
 		select {
 		case <-serverClosed:
@@ -168,7 +167,7 @@ func (a *APIStore) PutWithTag(ctx context.Context, tag string, chs <-chan swarm.
 		if err != nil {
 			return err
 		}
-		if mt != websocket.TextMessage || string(msg) != "success" {
+		if mt != websocket.BinaryMessage || !bytes.Equal(successWsMsg, msg) {
 			return errors.New("invalid msg returned on success")
 		}
 	}
