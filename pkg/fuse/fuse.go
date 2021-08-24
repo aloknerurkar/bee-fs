@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -95,7 +96,7 @@ func (f *fsNode) Reference() swarm.Address {
 }
 
 func (f *fsNode) IsDir() bool {
-	if len(f.chld) > 0 {
+	if f.stat.Mode&fuse.S_IFDIR > 0 {
 		return true
 	}
 	return false
@@ -119,7 +120,7 @@ func (f *fsNode) Metadata() string {
 	return base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
-func fromManifest(m *mantaray.Node, isDir bool, st store.PutGetter, encrypt bool) (*fsNode, error) {
+func fromManifest(m *mantaray.Node, st store.PutGetter, encrypt bool) (*fsNode, error) {
 	md := FsMetadata{}
 	mdBuf, err := base64.StdEncoding.DecodeString(m.Metadata()[MetadataKey])
 	if err != nil {
@@ -133,7 +134,7 @@ func fromManifest(m *mantaray.Node, isDir bool, st store.PutGetter, encrypt bool
 		return nil, err
 	}
 	var f *bf.BeeFile
-	if !isDir {
+	if md.Stat.Mode&fuse.S_IFREG > 0 {
 		f = bf.New(swarm.NewAddress(m.Entry()), st, encrypt)
 	}
 	return &fsNode{
@@ -169,12 +170,12 @@ func Restore(ctx context.Context, ref swarm.Address, dst string, st store.PutGet
 		if err != nil {
 			return err
 		}
-		fsNd, err := fromManifest(nd, isDir, st, encrypted)
+		fsNd, err := fromManifest(nd, st, encrypted)
 		if err != nil {
 			log.Errorf("failed reading from manifest", err)
 			return err
 		}
-		if !isDir {
+		if !fsNd.IsDir() {
 			err = tw.WriteHeader(&tar.Header{
 				Typeflag:   tar.TypeReg,
 				Name:       string(path),
@@ -202,6 +203,43 @@ func Restore(ctx context.Context, ref swarm.Address, dst string, st store.PutGet
 		return err
 	}
 	return tw.Flush()
+}
+
+func RestoreFile(ctx context.Context, ref swarm.Address, src, dst string, st store.PutGetter, encrypted bool) error {
+
+	ls := loadsave.New(st, storage.ModePutUpload, encrypted)
+	m := mantaray.NewNodeRef(ref.Bytes())
+
+	nd, err := m.LookupNode(ctx, []byte(src), ls)
+	if err != nil {
+		log.Error("failed lookup manifest", err)
+		return fmt.Errorf("file %s not found Err:%w", src, err)
+	}
+
+	fsNd, err := fromManifest(nd, st, encrypted)
+	if err != nil {
+		log.Error("failed reading from manifest", err)
+		return fmt.Errorf("failed reading from manifest Err:%w", err)
+	}
+
+	if fsNd.IsDir() {
+		log.Errorf("trying to restore directory")
+		return errors.New("cannot restore directory")
+	}
+
+	dstFile := filepath.Join(dst, filepath.Base(src))
+
+	out, err := os.Create(dstFile)
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(out, fsNd.data)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+
+	return out.Close()
 }
 
 type BeeFs struct {
@@ -282,7 +320,7 @@ func (b *BeeFs) Init() {
 		if err != nil {
 			return err
 		}
-		fsNd, err := fromManifest(nd, isDir, b.store, b.encrypt)
+		fsNd, err := fromManifest(nd, b.store, b.encrypt)
 		if err != nil {
 			return err
 		}
