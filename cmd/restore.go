@@ -32,15 +32,23 @@ func initRestoreCommands(root *cobra.Command) {
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
+			dstFile := args[0] + ".tar.gz"
+			if len(args) == 2 {
+				dstFile = filepath.Join(args[1], dstFile)
+			}
+
+			s := spinner.New(
+				spinner.CharSets[9],
+				100*time.Millisecond,
+				spinner.WithSuffix("restoring"),
+				spinner.WithFinalMSG(
+					fmt.Sprintf("Successfully restored snapshot %s at %s\n", args[0], dstFile),
+				),
+			)
 			s.Color("green")
 			s.Start()
 
-			dstFile := args[0] + ".tar.gz"
 			err := func() error {
-				if len(args) == 2 {
-					dstFile = filepath.Join(args[1], dstFile)
-				}
 				addrBytes, err := hex.DecodeString(args[0])
 				if err != nil {
 					return err
@@ -60,8 +68,6 @@ func initRestoreCommands(root *cobra.Command) {
 				return err
 			}
 
-			cmd.Println("Successfully restored snapshot", args[0], "at", dstFile)
-
 			return nil
 		},
 	}
@@ -78,6 +84,9 @@ func initRestoreCommands(root *cobra.Command) {
 				spinner.CharSets[9],
 				100*time.Millisecond,
 				spinner.WithSuffix("restoring"),
+				spinner.WithFinalMSG(
+					fmt.Sprintf("Successfully restored file %s from snapshot %s\n", filepath.Base(args[0]), SnapshotRef),
+				),
 			)
 			s.Color("green")
 			s.Start()
@@ -106,8 +115,6 @@ func initRestoreCommands(root *cobra.Command) {
 			if err != nil {
 				return err
 			}
-
-			cmd.Println("Successfully restored file", filepath.Base(args[0]), "from snapshot", SnapshotRef)
 
 			return nil
 		},

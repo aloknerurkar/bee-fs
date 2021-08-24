@@ -28,7 +28,11 @@ func initSnapshotCommands(root *cobra.Command) {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
+			s := spinner.New(
+				spinner.CharSets[9],
+				100*time.Millisecond,
+				spinner.WithSuffix("creating snapshot"),
+			)
 			s.Color("green")
 			s.Start()
 
@@ -80,7 +84,11 @@ func initSnapshotCommands(root *cobra.Command) {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
+			s := spinner.New(
+				spinner.CharSets[9],
+				100*time.Millisecond,
+				spinner.WithSuffix("fetching snapshot info"),
+			)
 			s.Color("green")
 			s.Start()
 
