@@ -12,6 +12,7 @@ import (
 
 	"github.com/aloknerurkar/bee-fs/pkg/api"
 	"github.com/aloknerurkar/bee-fs/pkg/mounter"
+	logger "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +20,7 @@ func initDaemon(cmd *cobra.Command) {
 	var (
 		port        int
 		apiFilePath string
+		enableLog   bool
 	)
 
 	daemonCmd := &cobra.Command{
@@ -32,6 +34,10 @@ func initDaemon(cmd *cobra.Command) {
 				if err != nil {
 					return err
 				}
+			}
+
+			if enableLog {
+				logger.SetLogLevel("*", "Debug")
 			}
 
 			addr := fmt.Sprintf("http://localhost:%d", port)
@@ -85,6 +91,7 @@ func initDaemon(cmd *cobra.Command) {
 
 	daemonCmd.Flags().IntVar(&port, "port", 8081, "Bee-fs API port")
 	daemonCmd.Flags().StringVar(&apiFilePath, "api-file-path", "", "Bee API file")
+	daemonCmd.Flags().BoolVar(&enableLog, "enable-log", false, "Enable Bee-fs logs")
 
 	cmd.AddCommand(daemonCmd)
 }

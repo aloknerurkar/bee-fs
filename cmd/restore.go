@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -26,20 +27,28 @@ func initRestoreCommands(root *cobra.Command) {
 	)
 
 	snapRestoreCmd := &cobra.Command{
-		Use:   "snapshot",
-		Short: "Create bee-fs endpoint snapshot",
+		Use:   "snapshot <Reference> <Folder path to restore snapshot>",
+		Short: "Restore bee-fs snapshot using reference",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
+			dstFile := args[0] + ".tar.gz"
+			if len(args) == 2 {
+				dstFile = filepath.Join(args[1], dstFile)
+			}
+
+			s := spinner.New(
+				spinner.CharSets[9],
+				100*time.Millisecond,
+				spinner.WithSuffix("restoring"),
+				spinner.WithFinalMSG(
+					fmt.Sprintf("Successfully restored snapshot %s at %s\n", args[0], dstFile),
+				),
+			)
 			s.Color("green")
 			s.Start()
 
-			dstFile := args[0] + ".tar.gz"
 			err := func() error {
-				if len(args) == 2 {
-					dstFile = filepath.Join(args[1], dstFile)
-				}
 				addrBytes, err := hex.DecodeString(args[0])
 				if err != nil {
 					return err
@@ -59,18 +68,68 @@ func initRestoreCommands(root *cobra.Command) {
 				return err
 			}
 
-			cmd.Println("Successfully restored snapshot", args[0], "at", dstFile)
+			return nil
+		},
+	}
+
+	var SnapshotRef string
+
+	fileRestoreCmd := &cobra.Command{
+		Use:   "file <File path from root of snapshot> <Folder path to restore file>",
+		Short: "Restore file from bee-fs snapshot",
+		Args:  cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+
+			s := spinner.New(
+				spinner.CharSets[9],
+				100*time.Millisecond,
+				spinner.WithSuffix("restoring"),
+				spinner.WithFinalMSG(
+					fmt.Sprintf("Successfully restored file %s from snapshot %s\n", filepath.Base(args[0]), SnapshotRef),
+				),
+			)
+			s.Color("green")
+			s.Start()
+
+			srcFile := args[0]
+			dstPath := ""
+			err := func() error {
+				if len(args) == 2 {
+					dstPath = args[1]
+				}
+				addrBytes, err := hex.DecodeString(SnapshotRef)
+				if err != nil {
+					return fmt.Errorf("invalid snapshot reference %w", err)
+				}
+				bStore := beestore.NewAPIStore(
+					APIHost,
+					APIHostPort,
+					APIUseSSL,
+					"",
+				)
+				return fs.RestoreFile(cmd.Context(), swarm.NewAddress(addrBytes), srcFile, dstPath, bStore, Encrypted)
+			}()
+
+			s.Stop()
+
+			if err != nil {
+				return err
+			}
 
 			return nil
 		},
 	}
 
-	snapRestoreCmd.Flags().StringVar(&APIHost, "host", "127.0.0.1", "Bee API Host")
-	snapRestoreCmd.Flags().IntVar(&APIHostPort, "port", 1633, "Bee API port")
-	snapRestoreCmd.Flags().BoolVar(&APIUseSSL, "ssl", false, "use ssl")
-	snapRestoreCmd.Flags().BoolVar(&Encrypted, "encrypted", false, "is encrypted")
+	fileRestoreCmd.Flags().StringVar(&SnapshotRef, "snapshot", "", "Swarm address of snapshot")
+	fileRestoreCmd.MarkFlagRequired("snapshot")
+
+	restoreCmd.PersistentFlags().StringVar(&APIHost, "host", "127.0.0.1", "Bee API Host")
+	restoreCmd.PersistentFlags().IntVar(&APIHostPort, "port", 1633, "Bee API port")
+	restoreCmd.PersistentFlags().BoolVar(&APIUseSSL, "ssl", false, "use ssl")
+	restoreCmd.PersistentFlags().BoolVar(&Encrypted, "encrypted", false, "is encrypted")
 
 	restoreCmd.AddCommand(snapRestoreCmd)
+	restoreCmd.AddCommand(fileRestoreCmd)
 
 	root.AddCommand(restoreCmd)
 }
