@@ -234,7 +234,11 @@ func initMountCommands(root *cobra.Command) {
 		Short: "List mounted bee-fs endpoints",
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
+			s := spinner.New(
+				spinner.CharSets[9],
+				100*time.Millisecond,
+				spinner.WithSuffix("fetching"),
+			)
 			s.Color("green")
 			s.Start()
 
