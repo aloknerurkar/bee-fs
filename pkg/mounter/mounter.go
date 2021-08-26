@@ -179,9 +179,12 @@ func (b *beeFsMounter) Mount(
 			Path: mntDir,
 		},
 	}
-	_, loaded := b.mnts.LoadOrStore(mntDir, mnt)
+	m, loaded := b.mnts.LoadOrStore(mntDir, mnt)
 	if loaded {
-		return info, errors.New("already mounted")
+		mnt = m.(*mount)
+		if mnt.info.Active {
+			return info, errors.New("already mounted")
+		}
 	}
 	for _, opt := range opts {
 		opt.apply(mnt)
